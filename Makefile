@@ -1,5 +1,6 @@
 CC   ?= cc
 NVCC ?= nvcc
+PYTHON ?= python3
 
 CUDA_ARCH  ?= native
 BUILD_TYPE ?= release
@@ -24,6 +25,7 @@ endif
 
 CUDA_OBJECT := $(BUILD_DIR)/main.o
 NAIVE_CUDA_OBJECT := $(BUILD_DIR)/gemm_naive.o
+TILED_CUDA_OBJECT := $(BUILD_DIR)/gemm_tiled.o
 GEMM_OBJECT := $(BUILD_DIR)/gemm_cpu.o
 MATRIX_OBJECT := $(BUILD_DIR)/matrix.o
 
@@ -38,7 +40,7 @@ CUDA_TEST_TARGET   := $(BUILD_DIR)/test_gemm_cuda
 BENCHMARK_TARGET   := $(BUILD_DIR)/benchmark_gemm
 CPU_TEST_TARGETS   := $(GEMM_TEST_TARGET) $(MATRIX_TEST_TARGET)
 
-.PHONY: all run test test-cpu test-cuda benchmark debug sanitize clean
+.PHONY: all run test test-cpu test-cuda benchmark plot debug sanitize clean
 
 all: $(TARGET) $(CPU_TEST_TARGETS) $(CUDA_TEST_TARGET) $(BENCHMARK_TARGET)
 
@@ -50,6 +52,10 @@ $(CUDA_OBJECT): src/main.cu include/cuda_check.h
 	$(NVCC) $(CPPFLAGS) $(NVCCFLAGS) -c $< -o $@
 
 $(NAIVE_CUDA_OBJECT): src/gemm_naive.cu include/gemm_cuda.h
+	@mkdir -p $(dir $@)
+	$(NVCC) $(CPPFLAGS) $(NVCCFLAGS) -c $< -o $@
+
+$(TILED_CUDA_OBJECT): src/gemm_tiled.cu include/gemm_cuda.h
 	@mkdir -p $(dir $@)
 	$(NVCC) $(CPPFLAGS) $(NVCCFLAGS) -c $< -o $@
 
@@ -86,10 +92,12 @@ $(MATRIX_TEST_TARGET): $(MATRIX_TEST_OBJECT) $(MATRIX_OBJECT)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
 
 $(CUDA_TEST_TARGET): $(CUDA_TEST_OBJECT) $(NAIVE_CUDA_OBJECT) \
+                     $(TILED_CUDA_OBJECT) \
                      $(GEMM_OBJECT) $(MATRIX_OBJECT)
 	$(NVCC) $(NVCCFLAGS) $^ -o $@ $(LDLIBS)
 
-$(BENCHMARK_TARGET): $(BENCHMARK_OBJECT) $(NAIVE_CUDA_OBJECT) $(MATRIX_OBJECT)
+$(BENCHMARK_TARGET): $(BENCHMARK_OBJECT) $(NAIVE_CUDA_OBJECT) \
+                     $(TILED_CUDA_OBJECT) $(MATRIX_OBJECT)
 	$(NVCC) $(NVCCFLAGS) $^ -o $@ $(LDLIBS)
 
 run: $(TARGET)
@@ -106,6 +114,9 @@ test-cuda: $(CUDA_TEST_TARGET)
 
 benchmark: $(BENCHMARK_TARGET)
 	@./$(BENCHMARK_TARGET)
+
+plot:
+	$(PYTHON) scripts/plot_benchmarks.py $(PLOT_ARGS)
 
 
 debug:
