@@ -23,24 +23,31 @@ $(error BUILD_TYPE must be either release or debug)
 endif
 
 CUDA_OBJECT := $(BUILD_DIR)/main.o
+NAIVE_CUDA_OBJECT := $(BUILD_DIR)/gemm_naive.o
 GEMM_OBJECT := $(BUILD_DIR)/gemm_cpu.o
 MATRIX_OBJECT := $(BUILD_DIR)/matrix.o
 
 GEMM_TEST_OBJECT   := $(BUILD_DIR)/test_gemm_cpu.o
 MATRIX_TEST_OBJECT := $(BUILD_DIR)/test_matrix.o
+CUDA_TEST_OBJECT   := $(BUILD_DIR)/test_gemm_cuda.o
 
 GEMM_TEST_TARGET   := $(BUILD_DIR)/test_gemm_cpu
 MATRIX_TEST_TARGET := $(BUILD_DIR)/test_matrix
-TEST_TARGETS       := $(GEMM_TEST_TARGET) $(MATRIX_TEST_TARGET)
+CUDA_TEST_TARGET   := $(BUILD_DIR)/test_gemm_cuda
+CPU_TEST_TARGETS   := $(GEMM_TEST_TARGET) $(MATRIX_TEST_TARGET)
 
-.PHONY: all run test debug sanitize clean
+.PHONY: all run test test-cpu test-cuda debug sanitize clean
 
-all: $(TARGET) $(TEST_TARGETS)
+all: $(TARGET) $(CPU_TEST_TARGETS) $(CUDA_TEST_TARGET)
 
 $(TARGET): $(CUDA_OBJECT)
 	$(NVCC) $(NVCCFLAGS) $^ -o $@
 
 $(CUDA_OBJECT): src/main.cu include/cuda_check.h
+	@mkdir -p $(dir $@)
+	$(NVCC) $(CPPFLAGS) $(NVCCFLAGS) -c $< -o $@
+
+$(NAIVE_CUDA_OBJECT): src/gemm_naive.cu include/gemm_cuda.h
 	@mkdir -p $(dir $@)
 	$(NVCC) $(CPPFLAGS) $(NVCCFLAGS) -c $< -o $@
 
@@ -60,25 +67,40 @@ $(MATRIX_TEST_OBJECT): tests/test_matrix.c include/matrix.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
+$(CUDA_TEST_OBJECT): tests/test_gemm_cuda.cu include/cuda_check.h \
+                    include/gemm.h include/gemm_cuda.h include/matrix.h
+	@mkdir -p $(dir $@)
+	$(NVCC) $(CPPFLAGS) $(NVCCFLAGS) -c $< -o $@
+
 $(GEMM_TEST_TARGET): $(GEMM_TEST_OBJECT) $(GEMM_OBJECT) $(MATRIX_OBJECT)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
 
 $(MATRIX_TEST_TARGET): $(MATRIX_TEST_OBJECT) $(MATRIX_OBJECT)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
 
+$(CUDA_TEST_TARGET): $(CUDA_TEST_OBJECT) $(NAIVE_CUDA_OBJECT) \
+                     $(GEMM_OBJECT) $(MATRIX_OBJECT)
+	$(NVCC) $(NVCCFLAGS) $^ -o $@ $(LDLIBS)
+
 run: $(TARGET)
 	./$(TARGET)
 
-test: $(TEST_TARGETS)
+test: test-cpu test-cuda
+
+test-cpu: $(CPU_TEST_TARGETS)
 	./$(GEMM_TEST_TARGET)
 	./$(MATRIX_TEST_TARGET)
+
+test-cuda: $(CUDA_TEST_TARGET)
+	./$(CUDA_TEST_TARGET)
 
 
 debug:
 	$(MAKE) BUILD_TYPE=debug
 
-sanitize: $(TARGET)
-	compute-sanitizer --tool memcheck ./$(TARGET)
+sanitize: $(CUDA_TEST_TARGET)
+	compute-sanitizer --tool memcheck ./$(CUDA_TEST_TARGET)
+	compute-sanitizer --tool synccheck ./$(CUDA_TEST_TARGET)
 
 clean:
 	rm -rf build
