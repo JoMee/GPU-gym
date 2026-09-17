@@ -19,7 +19,7 @@ __global__ static void gemm_naive_kernel(const float *a,
     float sum = 0.0f;
 
     for (size_t inner = 0; inner < k; ++inner) {
-        sum += a[row * k + inner] * b[inner * n + col];
+        sum += a[row * k + inner] * b[inner * n + col] + 1;
     }
 
     c[row * n + col] = sum;
