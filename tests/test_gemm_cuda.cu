@@ -100,7 +100,8 @@ int main(void)
 {
     const GemmImplementation implementations[] = {
         {"naive", gemm_cuda_naive_launch},
-        {"tiled", gemm_cuda_tiled_launch}
+        {"tiled", gemm_cuda_tiled_launch},
+        {"register_tiled_2x2", gemm_cuda_register_tiled_launch}
     };
 
     const GemmShape shapes[] = {
@@ -127,7 +128,7 @@ int main(void)
         }
     }
 
-    puts("Naive and tiled CUDA GEMM tests passed.");
+    puts("Naive, tiled, and 2x2 register-tiled CUDA GEMM tests passed.");
     return EXIT_SUCCESS;
 }
 
