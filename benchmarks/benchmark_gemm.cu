@@ -33,6 +33,14 @@ typedef struct {
     double p90;
 } Statistics;
 
+typedef cudaError_t (*GemmLaunch)(const float *, const float *, float *,
+                                  size_t, size_t, size_t);
+
+typedef struct {
+    const char *name;
+    GemmLaunch launch;
+} GemmImplementation;
+
 static int compare_double(const void *left, const void *right)
 {
     const double a = *(const double *)left;
@@ -90,7 +98,8 @@ static double monotonic_ms(void)
          + 1.0e-6 * (double)timestamp.tv_nsec;
 }
 
-static double measure_kernel_ms(const float *device_a,
+static double measure_kernel_ms(GemmLaunch launch,
+                                const float *device_a,
                                 const float *device_b,
                                 float *device_c,
                                 GemmShape shape,
@@ -104,8 +113,8 @@ static double measure_kernel_ms(const float *device_a,
     CUDA_CHECK(cudaEventRecord(start));
 
     for (size_t iteration = 0; iteration < iterations; ++iteration) {
-        CUDA_CHECK(gemm_cuda_naive_launch(device_a, device_b, device_c,
-                                          shape.m, shape.n, shape.k));
+        CUDA_CHECK(launch(device_a, device_b, device_c,
+                          shape.m, shape.n, shape.k));
     }
 
     CUDA_CHECK(cudaEventRecord(stop));
@@ -119,7 +128,8 @@ static double measure_kernel_ms(const float *device_a,
     return (double)total_ms / (double)iterations;
 }
 
-static double measure_pipeline_ms(const float *host_a,
+static double measure_pipeline_ms(GemmLaunch launch,
+                                  const float *host_a,
                                   const float *host_b,
                                   float *host_c,
                                   float *device_a,
@@ -138,8 +148,8 @@ static double measure_pipeline_ms(const float *host_a,
                               cudaMemcpyHostToDevice));
         CUDA_CHECK(cudaMemcpy(device_b, host_b, b_bytes,
                               cudaMemcpyHostToDevice));
-        CUDA_CHECK(gemm_cuda_naive_launch(device_a, device_b, device_c,
-                                          shape.m, shape.n, shape.k));
+        CUDA_CHECK(launch(device_a, device_b, device_c,
+                          shape.m, shape.n, shape.k));
         CUDA_CHECK(cudaMemcpy(host_c, device_c, c_bytes,
                               cudaMemcpyDeviceToHost));
     }
@@ -167,7 +177,9 @@ static size_t choose_iterations(double milliseconds_per_iteration,
     return (size_t)requested;
 }
 
-static int run_benchmark(GemmShape shape, uint32_t seed)
+static int run_benchmark(GemmImplementation implementation,
+                         GemmShape shape,
+                         uint32_t seed)
 {
     size_t a_bytes;
     size_t b_bytes;
@@ -207,30 +219,34 @@ static int run_benchmark(GemmShape shape, uint32_t seed)
     CUDA_CHECK(cudaMemcpy(device_b, host_b, b_bytes, cudaMemcpyHostToDevice));
 
     for (int launch = 0; launch < WARMUP_LAUNCHES; ++launch) {
-        CUDA_CHECK(gemm_cuda_naive_launch(device_a, device_b, device_c,
-                                          shape.m, shape.n, shape.k));
+        CUDA_CHECK(implementation.launch(device_a, device_b, device_c,
+                                         shape.m, shape.n, shape.k));
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 
     const double calibration_kernel_ms =
-        measure_kernel_ms(device_a, device_b, device_c, shape,
+        measure_kernel_ms(implementation.launch,
+                          device_a, device_b, device_c, shape,
                           CALIBRATION_ITERATIONS);
     const size_t kernel_iterations =
         choose_iterations(calibration_kernel_ms, MAX_KERNEL_ITERATIONS);
 
     /* One full calibrated batch lets clocks and caches settle before sampling. */
-    (void)measure_kernel_ms(device_a, device_b, device_c, shape,
+    (void)measure_kernel_ms(implementation.launch,
+                            device_a, device_b, device_c, shape,
                             kernel_iterations);
 
     double kernel_samples[SAMPLE_COUNT];
     for (size_t sample = 0; sample < SAMPLE_COUNT; ++sample) {
         kernel_samples[sample] =
-            measure_kernel_ms(device_a, device_b, device_c, shape,
+            measure_kernel_ms(implementation.launch,
+                              device_a, device_b, device_c, shape,
                               kernel_iterations);
     }
 
     const double calibration_pipeline_ms =
-        measure_pipeline_ms(host_a, host_b, host_c,
+        measure_pipeline_ms(implementation.launch,
+                            host_a, host_b, host_c,
                             device_a, device_b, device_c,
                             a_bytes, b_bytes, c_bytes, shape, 1);
     const size_t pipeline_iterations =
@@ -239,7 +255,8 @@ static int run_benchmark(GemmShape shape, uint32_t seed)
     double pipeline_samples[SAMPLE_COUNT];
     for (size_t sample = 0; sample < SAMPLE_COUNT; ++sample) {
         pipeline_samples[sample] =
-            measure_pipeline_ms(host_a, host_b, host_c,
+            measure_pipeline_ms(implementation.launch,
+                                host_a, host_b, host_c,
                                 device_a, device_b, device_c,
                                 a_bytes, b_bytes, c_bytes, shape,
                                 pipeline_iterations);
@@ -256,10 +273,10 @@ static int run_benchmark(GemmShape shape, uint32_t seed)
     const double kernel_gflops = operations / (kernel.median * 1.0e6);
     const double pipeline_gflops = operations / (pipeline.median * 1.0e6);
 
-    printf("naive,%zu,%zu,%zu,%zu,%zu,"
+    printf("%s,%zu,%zu,%zu,%zu,%zu,"
            "%.6f,%.6f,%.6f,%.3f,"
            "%.6f,%.6f,%.3f\n",
-           shape.m, shape.n, shape.k,
+           implementation.name, shape.m, shape.n, shape.k,
            kernel_iterations, pipeline_iterations,
            kernel.minimum, kernel.median, kernel.p90, kernel_gflops,
            pipeline.median, pipeline.p90, pipeline_gflops);
@@ -319,6 +336,13 @@ static void print_environment(void)
 
 int main(int argc, char **argv)
 {
+    const GemmImplementation implementations[] = {
+        {"naive", gemm_cuda_naive_launch},
+        {"tiled", gemm_cuda_tiled_launch}
+    };
+    const size_t implementation_count =
+        sizeof(implementations) / sizeof(implementations[0]);
+
     print_environment();
 
     if (argc == 4) {
@@ -330,9 +354,15 @@ int main(int argc, char **argv)
             return EXIT_FAILURE;
         }
 
-        return run_benchmark(shape, UINT32_C(3000))
-             ? EXIT_SUCCESS
-             : EXIT_FAILURE;
+        for (size_t implementation = 0;
+             implementation < implementation_count;
+             ++implementation) {
+            if (!run_benchmark(implementations[implementation], shape,
+                               UINT32_C(3000))) {
+                return EXIT_FAILURE;
+            }
+        }
+        return EXIT_SUCCESS;
     }
 
     if (argc != 1) {
@@ -352,13 +382,16 @@ int main(int argc, char **argv)
 
     const size_t shape_count = sizeof(shapes) / sizeof(shapes[0]);
     for (size_t index = 0; index < shape_count; ++index) {
-        if (!run_benchmark(shapes[index],
-                           UINT32_C(3000) + (uint32_t)index)) {
-            return EXIT_FAILURE;
+        for (size_t implementation = 0;
+             implementation < implementation_count;
+             ++implementation) {
+            if (!run_benchmark(implementations[implementation], shapes[index],
+                               UINT32_C(3000) + (uint32_t)index)) {
+                return EXIT_FAILURE;
+            }
         }
     }
 
     return EXIT_SUCCESS;
 }
-
 

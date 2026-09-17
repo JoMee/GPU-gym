@@ -15,7 +15,17 @@ typedef struct {
     size_t k;
 } GemmShape;
 
-static int test_shape(GemmShape shape, uint32_t seed)
+typedef cudaError_t (*GemmLaunch)(const float *, const float *, float *,
+                                  size_t, size_t, size_t);
+
+typedef struct {
+    const char *name;
+    GemmLaunch launch;
+} GemmImplementation;
+
+static int test_shape(GemmImplementation implementation,
+                      GemmShape shape,
+                      uint32_t seed)
 {
     const size_t a_bytes = shape.m * shape.k * sizeof(float);
     const size_t b_bytes = shape.k * shape.n * sizeof(float);
@@ -50,8 +60,8 @@ static int test_shape(GemmShape shape, uint32_t seed)
     CUDA_CHECK(cudaMemcpy(device_a, a, a_bytes, cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(device_b, b, b_bytes, cudaMemcpyHostToDevice));
 
-    CUDA_CHECK(gemm_cuda_naive_launch(device_a, device_b, device_c,
-                                      shape.m, shape.n, shape.k));
+    CUDA_CHECK(implementation.launch(device_a, device_b, device_c,
+                                     shape.m, shape.n, shape.k));
 
     /* This blocking copy also waits for the kernel and reports execution errors. */
     CUDA_CHECK(cudaMemcpy(actual, device_c, c_bytes, cudaMemcpyDeviceToHost));
@@ -67,9 +77,9 @@ static int test_shape(GemmShape shape, uint32_t seed)
         const size_t col = comparison.worst_index % shape.n;
 
         fprintf(stderr,
-                "CUDA GEMM %zux%zux%zu failed at (%zu, %zu): "
+                "%s CUDA GEMM %zux%zux%zu failed at (%zu, %zu): "
                 "GPU %.9g, CPU %.9g, absolute error %.9g, allowed %.9g\n",
-                shape.m, shape.n, shape.k, row, col,
+                implementation.name, shape.m, shape.n, shape.k, row, col,
                 actual[comparison.worst_index],
                 reference[comparison.worst_index],
                 comparison.worst_absolute_error,
@@ -88,6 +98,11 @@ static int test_shape(GemmShape shape, uint32_t seed)
 
 int main(void)
 {
+    const GemmImplementation implementations[] = {
+        {"naive", gemm_cuda_naive_launch},
+        {"tiled", gemm_cuda_tiled_launch}
+    };
+
     const GemmShape shapes[] = {
         {1, 1, 1},
         {2, 5, 3},
@@ -97,17 +112,22 @@ int main(void)
         {33, 31, 35}
     };
 
+    const size_t implementation_count =
+        sizeof(implementations) / sizeof(implementations[0]);
     const size_t shape_count = sizeof(shapes) / sizeof(shapes[0]);
 
-    for (size_t index = 0; index < shape_count; ++index) {
-        if (!test_shape(shapes[index],
-                        UINT32_C(2000) + (uint32_t)index)) {
-            return EXIT_FAILURE;
+    for (size_t implementation = 0;
+         implementation < implementation_count;
+         ++implementation) {
+        for (size_t index = 0; index < shape_count; ++index) {
+            if (!test_shape(implementations[implementation], shapes[index],
+                            UINT32_C(2000) + (uint32_t)index)) {
+                return EXIT_FAILURE;
+            }
         }
     }
 
-    puts("Naive CUDA GEMM tests passed.");
+    puts("Naive and tiled CUDA GEMM tests passed.");
     return EXIT_SUCCESS;
 }
-
 
