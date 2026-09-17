@@ -1,5 +1,6 @@
 #include "matrix.h"
 
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -109,4 +110,66 @@ void matrix_print(const char *name,
     }
 }
 
+MatrixComparison matrix_compare(const float *actual,
+                                const float *reference,
+                                size_t rows,
+                                size_t cols,
+                                double absolute_tolerance,
+                                double relative_tolerance)
+{
+    MatrixComparison result = {0};
+    size_t element_count = 0;
 
+    if (actual == NULL
+        || reference == NULL
+        || absolute_tolerance < 0.0
+        || relative_tolerance < 0.0
+        || !matrix_element_count(rows, cols, &element_count)) {
+        return result;
+    }
+
+    result.valid = 1;
+
+    for (size_t index = 0; index < element_count; ++index) {
+        const double actual_value = actual[index];
+        const double reference_value = reference[index];
+
+        double absolute_error;
+        double allowed_error;
+        double error_ratio;
+
+        if (actual_value == reference_value) {
+            absolute_error = 0.0;
+            allowed_error = absolute_tolerance
+                          + relative_tolerance * fabs(reference_value);
+            error_ratio = 0.0;
+        } else if (!isfinite(actual_value) || !isfinite(reference_value)) {
+            absolute_error = INFINITY;
+            allowed_error = 0.0;
+            error_ratio = INFINITY;
+        } else {
+            absolute_error = fabs(actual_value - reference_value);
+            allowed_error = absolute_tolerance
+                          + relative_tolerance * fabs(reference_value);
+
+            if (allowed_error > 0.0) {
+                error_ratio = absolute_error / allowed_error;
+            } else {
+                error_ratio = absolute_error == 0.0 ? 0.0 : INFINITY;
+            }
+        }
+
+        if (!(absolute_error <= allowed_error)) {
+            ++result.mismatch_count;
+        }
+
+        if (error_ratio > result.worst_error_ratio) {
+            result.worst_index = index;
+            result.worst_absolute_error = absolute_error;
+            result.worst_allowed_error = allowed_error;
+            result.worst_error_ratio = error_ratio;
+        }
+    }
+
+    return result;
+}

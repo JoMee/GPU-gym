@@ -10,6 +10,7 @@ TARGET    := $(BUILD_DIR)/gemm_lab
 CPPFLAGS  := -Iinclude
 CFLAGS    := -std=c17 -Wall -Wextra -Wpedantic
 NVCCFLAGS := -arch=$(CUDA_ARCH) -lineinfo -Xcompiler=-Wall,-Wextra
+LDLIBS    := -lm
 
 ifeq ($(BUILD_TYPE),debug)
 CFLAGS    += -O0 -g
@@ -51,7 +52,7 @@ $(MATRIX_OBJECT): src/matrix.c include/matrix.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
-$(GEMM_TEST_OBJECT): tests/test_gemm_cpu.c include/gemm.h
+$(GEMM_TEST_OBJECT): tests/test_gemm_cpu.c include/gemm.h include/matrix.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
@@ -59,11 +60,11 @@ $(MATRIX_TEST_OBJECT): tests/test_matrix.c include/matrix.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
-$(GEMM_TEST_TARGET): $(GEMM_TEST_OBJECT) $(GEMM_OBJECT)
-	$(CC) $(CFLAGS) $^ -o $@
+$(GEMM_TEST_TARGET): $(GEMM_TEST_OBJECT) $(GEMM_OBJECT) $(MATRIX_OBJECT)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
 
 $(MATRIX_TEST_TARGET): $(MATRIX_TEST_OBJECT) $(MATRIX_OBJECT)
-	$(CC) $(CFLAGS) $^ -o $@
+	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
 
 run: $(TARGET)
 	./$(TARGET)
