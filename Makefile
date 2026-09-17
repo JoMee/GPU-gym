@@ -26,6 +26,7 @@ endif
 CUDA_OBJECT := $(BUILD_DIR)/main.o
 NAIVE_CUDA_OBJECT := $(BUILD_DIR)/gemm_naive.o
 TILED_CUDA_OBJECT := $(BUILD_DIR)/gemm_tiled.o
+REGISTER_TILED_CUDA_OBJECT := $(BUILD_DIR)/gemm_register_tiled.o
 GEMM_OBJECT := $(BUILD_DIR)/gemm_cpu.o
 MATRIX_OBJECT := $(BUILD_DIR)/matrix.o
 
@@ -56,6 +57,10 @@ $(NAIVE_CUDA_OBJECT): src/gemm_naive.cu include/gemm_cuda.h
 	$(NVCC) $(CPPFLAGS) $(NVCCFLAGS) -c $< -o $@
 
 $(TILED_CUDA_OBJECT): src/gemm_tiled.cu include/gemm_cuda.h
+	@mkdir -p $(dir $@)
+	$(NVCC) $(CPPFLAGS) $(NVCCFLAGS) -c $< -o $@
+
+$(REGISTER_TILED_CUDA_OBJECT): src/gemm_register_tiled.cu include/gemm_cuda.h
 	@mkdir -p $(dir $@)
 	$(NVCC) $(CPPFLAGS) $(NVCCFLAGS) -c $< -o $@
 
@@ -92,12 +97,13 @@ $(MATRIX_TEST_TARGET): $(MATRIX_TEST_OBJECT) $(MATRIX_OBJECT)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
 
 $(CUDA_TEST_TARGET): $(CUDA_TEST_OBJECT) $(NAIVE_CUDA_OBJECT) \
-                     $(TILED_CUDA_OBJECT) \
+                     $(TILED_CUDA_OBJECT) $(REGISTER_TILED_CUDA_OBJECT) \
                      $(GEMM_OBJECT) $(MATRIX_OBJECT)
 	$(NVCC) $(NVCCFLAGS) $^ -o $@ $(LDLIBS)
 
 $(BENCHMARK_TARGET): $(BENCHMARK_OBJECT) $(NAIVE_CUDA_OBJECT) \
-                     $(TILED_CUDA_OBJECT) $(MATRIX_OBJECT)
+                     $(TILED_CUDA_OBJECT) $(REGISTER_TILED_CUDA_OBJECT) \
+                     $(MATRIX_OBJECT)
 	$(NVCC) $(NVCCFLAGS) $^ -o $@ $(LDLIBS)
 
 run: $(TARGET)

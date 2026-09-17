@@ -338,7 +338,8 @@ int main(int argc, char **argv)
 {
     const GemmImplementation implementations[] = {
         {"naive", gemm_cuda_naive_launch},
-        {"tiled", gemm_cuda_tiled_launch}
+        {"tiled", gemm_cuda_tiled_launch},
+        {"register_tiled_2x2", gemm_cuda_register_tiled_launch}
     };
     const size_t implementation_count =
         sizeof(implementations) / sizeof(implementations[0]);

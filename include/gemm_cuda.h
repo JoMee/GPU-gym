@@ -34,6 +34,14 @@ cudaError_t gemm_cuda_tiled_launch(const float *device_a,
                                    size_t n,
                                    size_t k);
 
+/* Shared-memory tiling plus a 2 x 2 output register tile per thread. */
+cudaError_t gemm_cuda_register_tiled_launch(const float *device_a,
+                                            const float *device_b,
+                                            float *device_c,
+                                            size_t m,
+                                            size_t n,
+                                            size_t k);
+
 #ifdef __cplusplus
 }
 #endif
